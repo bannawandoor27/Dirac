@@ -7,6 +7,7 @@ use rustyline::highlight::{MatchingBracketHighlighter, Highlighter};
 use rustyline::hint::{HistoryHinter, Hinter};
 use std::borrow::Cow;
 use rustyline::history::DefaultHistory;
+use std::io::Write;
 
 pub struct DiracCompleter {
     filename_completer: FilenameCompleter,
@@ -112,7 +113,6 @@ pub struct DiracTerminal {
     editor: Editor<DiracHelper, DefaultHistory>,
     command_executor: ShellCommandExecutor,
     ai_processor: OllamaProcessor,
-    plugin_manager: DefaultPluginManager,
 }
 
 impl DiracTerminal {
@@ -120,20 +120,12 @@ impl DiracTerminal {
         let config = Config::builder()
             .completion_type(CompletionType::List)
             .edit_mode(EditMode::Emacs)
-            .auto_add_history(true)
             .build();
-        
-        let mut editor = Editor::<DiracHelper, DefaultHistory>::with_config(config).unwrap();
-        editor.set_helper(Some(DiracHelper::new()));
-        
-        // Load command history if exists
-        let _ = editor.load_history("~/.dirac_history");
-        
+        let editor = Editor::with_config(config).unwrap();
         Self {
             editor,
             command_executor: ShellCommandExecutor::new(),
             ai_processor: OllamaProcessor::with_default_config(),
-            plugin_manager: DefaultPluginManager::new(),
         }
     }
     
@@ -258,25 +250,6 @@ impl DiracTerminal {
             return;
         }
 
-        // First try to handle via plugins
-        let parts: Vec<&str> = input.split_whitespace().collect();
-        if let Some(plugin_name) = parts.first() {
-            if let Some(plugin) = self.plugin_manager.get_plugin(plugin_name) {
-                match plugin.execute(input) {
-                    Ok(output) => {
-                        if !output.is_empty() {
-                            println!("{}", output);
-                        }
-                        return;
-                    }
-                    Err(e) => {
-                        eprintln!("{}", e.to_string().red());
-                        return;
-                    }
-                }
-            }
-        }
-
         // Check for common typos in directory names
         if input.starts_with("cd ") {
             let path = input.trim_start_matches("cd ").trim();
@@ -306,11 +279,11 @@ impl DiracTerminal {
         if input.starts_with("go to ") || input.starts_with("open ") || input.starts_with("change to ") {
             let path = input.split_whitespace().skip(2).collect::<Vec<_>>().join(" ");
             let cd_command = format!("cd {}", path);
-            self.execute_direct_command(&cd_command);
+            self.execute_direct_command(&cd_command).await;
         }
         // If it's a direct command, execute it
         else if self.command_executor.is_valid_command(input) {
-            self.execute_direct_command(input);
+            self.execute_direct_command(input).await;
         } else {
             self.process_ai_command(input).await;
         }
@@ -322,15 +295,20 @@ impl DiracTerminal {
                 if !output.is_empty() {
                     println!("{}", output);
                 }
+                // Ensure output is flushed
+                std::io::stdout().flush().unwrap_or_default();
             }
-            Err(e) => eprintln!("{}", e.to_string().red()),
+            Err(e) => {
+                eprintln!("{}", e.to_string().red());
+                std::io::stderr().flush().unwrap_or_default();
+            }
         }
     }
 
     async fn process_ai_command(&mut self, input: &str) {
-        println!("{}", "🤖 Processing your request with AI...".yellow().bold());
-        println!("{} {}", "Input:".blue(), input);
-        println!("{}", "Analyzing and generating the most appropriate command...".yellow());
+        println!("{}", "🤖 Processing with AI...".yellow().bold());
+        println!("{} {}", "Request:".blue(), input);
+        println!("{}", "Analyzing request and generating command...".yellow());
         
         match self.ai_processor.process(input, String::new().as_str()).await {
             Ok(suggested_command) => self.handle_ai_suggestion(suggested_command.as_str()).await,
@@ -357,10 +335,10 @@ impl DiracTerminal {
             return;
         }
     
-        println!("{}", "\n=== AI Suggestion =====".green().bold());
-        println!("{} {}", "📎 Suggested command:".blue(), command.yellow());
+        println!("{}", "\n=== Command Suggestion =====".green().bold());
+        println!("{} {}", "📎 Command:".blue(), command.yellow());
         if !explanation.is_empty() {
-            println!("{} {}", "💡 Explanation:".blue(), explanation);
+            println!("{} {}", "💡 Details:".blue(), explanation);
         }
     
         // Only show execution prompt if we have a valid command

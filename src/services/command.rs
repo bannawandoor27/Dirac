@@ -93,37 +93,19 @@ impl CommandExecutor for ShellCommandExecutor {
         }
 
         // Set a reasonable timeout for commands
-let timeout_duration = Duration::from_secs(30);
+        let timeout_duration = Duration::from_secs(30);
 
-// Use tokio's async Command for potentially long-running operations
-let output = if command.starts_with("lsof") || command.starts_with("netstat") {
-    match timeout(timeout_duration, TokioCommand::new(&self.shell_path)
-        .arg("-c")
-        .arg(command)
-        .current_dir(&*self.current_dir.borrow())
-        .output()).await {
-            Ok(result) => result.map_err(|e| DiracError::CommandExecutionError(
-                format!("Failed to execute command: {}", e)
-            ))?,
-            Err(_) => return Err(DiracError::CommandExecutionError(
-                format!("Command timed out after {} seconds", timeout_duration.as_secs())
-            ))
-    }
-} else {
-    Command::new(&self.shell_path)
-        .arg("-c")
-        .arg(command)
-        .env("ZDOTDIR", env::var("HOME").unwrap_or_else(|_| String::from("/")))
-        .env("ZSH_HISTORY_FILE", ".zsh_history")
-        .current_dir(&*self.current_dir.borrow())
-        .output()
-        .map_err(|e| DiracError::CommandExecutionError(format!("Failed to execute command: {}", e)))?
-};
-
-        // Handle process termination signals
-        if output.status.code().is_none() {
-            return Err(DiracError::CommandExecutionError("Command was terminated by a signal".to_string()));
-        }
+        // Use tokio's async Command for all commands to ensure proper output handling
+        let output = TokioCommand::new(&self.shell_path)
+            .arg("-c")
+            .arg(command)
+            .env("TERM", "xterm-256color")
+            .env("SHELL", &self.shell_path)
+            .env("PATH", env::var("PATH").unwrap_or_else(|_| String::from("/usr/local/bin:/usr/bin:/bin")))
+            .current_dir(&*self.current_dir.borrow())
+            .output()
+            .await
+            .map_err(|e| DiracError::CommandExecutionError(format!("Failed to execute command: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -134,21 +116,21 @@ let output = if command.starts_with("lsof") || command.starts_with("netstat") {
         }
 
         // Handle command execution status and output
-        match (output.status.success(), stderr.is_empty()) {
-            (true, true) => Ok(stdout),
-            (true, false) => {
-                // Command succeeded but produced stderr output
-                if !stdout.is_empty() {
-                    Ok(format!("{}
-Warning: {}", stdout, stderr))
-                } else {
-                    Ok(format!("Warning: {}", stderr))
-                }
-            },
-            (false, _) => Err(DiracError::CommandExecutionError(format!("Command failed (exit code: {}): {}", 
-                output.status.code().unwrap_or(-1),
-                if stderr.is_empty() { &stdout } else { &stderr }
-            )))
+        if output.status.success() {
+            if !stdout.is_empty() {
+                Ok(stdout)
+            } else if !stderr.is_empty() {
+                Ok(stderr)
+            } else {
+                Ok(String::new())
+            }
+        } else {
+            Err(DiracError::CommandExecutionError(
+                format!("Command failed (exit code: {}): {}", 
+                    output.status.code().unwrap_or(-1),
+                    if !stderr.is_empty() { stderr.trim() } else { stdout.trim() }
+                )
+            ))
         }
     }
 }

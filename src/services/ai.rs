@@ -29,23 +29,69 @@ impl OllamaProcessor {
 #[async_trait::async_trait]
 impl AIProcessor for OllamaProcessor {
     async fn process<'a>(&'a self, input: &'a str, context: &'a str) -> DiracResult<String> {
+        let current_dir = std::env::current_dir().unwrap_or_default().display().to_string();
+        let os_type = if cfg!(target_os = "windows") {
+            "windows"
+        } else if cfg!(target_os = "macos") {
+            "macos"
+        } else {
+            "linux"
+        };
+        let directory_structure = std::fs::read_dir(".").map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| format!("  {}", e.file_name().to_string_lossy()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }).unwrap_or_default();
+
+        // Improved system prompt:
+        let prompt = format!(
+            "You are a sophisticated terminal command generator that converts natural language requests into precise, executable shell commands.
+When provided with a user request and additional context, you must:
+  
+1. **Ensure Accuracy and Safety**:
+   - Generate commands that can be executed directly without any modifications.
+   - Prioritize safe, non-destructive commands (e.g., 'ls', 'pwd') when the request is ambiguous.
+   - Convert natural language navigation requests (such as 'go to', 'open', 'change to') into the appropriate 'cd' commands.
+
+2. **Detect and Correct Typos**:
+   - Identify any typographical errors (for example, convert 'lsbkk' to 'ls').
+   - If a correction is made or multiple interpretations are possible, include clear guidance in the explanation.
+
+3. **Leverage Context**:
+   - Use the provided details about the current working directory, operating system, and directory structure to tailor your response.
+   - Ensure that any suggested navigation or file-related commands reflect the actual environment.
+
+4. **Follow the Strict Response Format**:
+   - Your answer must be in the exact format shown below with no extra text:
+     
+     COMMAND: <the exact command to execute>
+     EXPLANATION: <a concise explanation of the command, including any corrections or alternative suggestions>
+
+**Input Details**:
+- User Request: '{}'
+- Additional Context: '{}'
+- Current Environment:
+   - Working Directory: {}
+   - OS Type: {}
+   - Directory Structure:
+{}
+
+Based on these details, generate the appropriate terminal command and a brief explanation.",
+            input,
+            context,
+            current_dir,
+            os_type,
+            directory_structure
+        );
+
         let response = self
             .client
             .post(&self.api_url)
             .json(&json!({
                 "model": self.model,
-                "prompt": format!("You are a helpful terminal command assistant. Given this request: '{}' and context: '{}', generate a terminal command that would help accomplish this task.\n\nCurrent Environment:\n- Working Directory: {}\n- OS Type: {}\n- Directory Structure:\n{}\n\nFollow these rules:\n1. For navigation commands like 'go to [dir]', 'open [dir]', 'change to [dir]', convert them to appropriate 'cd' commands\n2. If the input is ambiguous (like single letters 'l'), suggest the most common command (like 'ls') and explain alternatives\n3. If the input looks like a typo (e.g. 'srcc' instead of 'src'), suggest the correction\n4. For failed commands, provide helpful suggestions and alternatives\n5. Include examples when relevant\n6. Consider the current directory structure and OS when suggesting commands\n7. ALWAYS provide both a command and an explanation\n8. NEVER return an empty command\n9. If unsure, suggest a safe, basic command like 'ls' or 'pwd'\n10. For natural language navigation (e.g. 'go to', 'open directory'), always convert to proper cd commands\n\nYour response MUST be in this exact format:\nCOMMAND: <the exact command to run>\nEXPLANATION: <brief explanation of what the command does, including alternatives or corrections if applicable>", 
-                    input, 
-                    context,
-                    std::env::current_dir().unwrap_or_default().display(),
-                    if cfg!(target_os = "windows") { "windows" } else if cfg!(target_os = "macos") { "macos" } else { "linux" },
-                    std::fs::read_dir(".").map(|entries| {
-                        entries
-                            .filter_map(|e| e.ok())
-                            .map(|e| format!("  {}", e.file_name().to_string_lossy()))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    }).unwrap_or_default()),
+                "prompt": prompt,
                 "stream": false
             }))
             .send()

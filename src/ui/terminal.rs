@@ -7,6 +7,7 @@ use rustyline::highlight::{MatchingBracketHighlighter, Highlighter};
 use rustyline::hint::{HistoryHinter, Hinter};
 use std::borrow::Cow;
 use rustyline::history::DefaultHistory;
+use std::io::Write;
 
 pub struct DiracCompleter {
     filename_completer: FilenameCompleter,
@@ -112,7 +113,6 @@ pub struct DiracTerminal {
     editor: Editor<DiracHelper, DefaultHistory>,
     command_executor: ShellCommandExecutor,
     ai_processor: OllamaProcessor,
-    plugin_manager: DefaultPluginManager,
 }
 
 impl DiracTerminal {
@@ -120,20 +120,12 @@ impl DiracTerminal {
         let config = Config::builder()
             .completion_type(CompletionType::List)
             .edit_mode(EditMode::Emacs)
-            .auto_add_history(true)
             .build();
-        
-        let mut editor = Editor::<DiracHelper, DefaultHistory>::with_config(config).unwrap();
-        editor.set_helper(Some(DiracHelper::new()));
-        
-        // Load command history if exists
-        let _ = editor.load_history("~/.dirac_history");
-        
+        let editor = Editor::with_config(config).unwrap();
         Self {
             editor,
             command_executor: ShellCommandExecutor::new(),
             ai_processor: OllamaProcessor::with_default_config(),
-            plugin_manager: DefaultPluginManager::new(),
         }
     }
     
@@ -246,7 +238,30 @@ impl DiracTerminal {
             return Ok(true);
         }
 
-        self.process_command(input).await;
+        match self.command_executor.execute(input).await {
+            Ok(output) => {
+                if !output.is_empty() {
+                    println!("{}", output);
+                }
+            }
+            Err(e) => {
+                eprintln!("{}", e.to_string().red());
+                // Get AI feedback for the failed command
+                match self.ai_processor.process(
+                    &format!("Command '{}' failed. Please explain what went wrong and suggest a solution.", input),
+                    &e.to_string()
+                ).await {
+                    Ok(feedback) => {
+                        println!("");
+                        println!("{}", "🤖 AI Feedback:".blue().bold());
+                        println!("{}", feedback);
+                    }
+                    Err(ai_err) => {
+                        eprintln!("{}", format!("Failed to get AI feedback: {}", ai_err).red());
+                    }
+                }
+            }
+        };
         Ok(false)
     }
 
@@ -256,25 +271,6 @@ impl DiracTerminal {
         // Handle empty input
         if input.is_empty() {
             return;
-        }
-
-        // First try to handle via plugins
-        let parts: Vec<&str> = input.split_whitespace().collect();
-        if let Some(plugin_name) = parts.first() {
-            if let Some(plugin) = self.plugin_manager.get_plugin(plugin_name) {
-                match plugin.execute(input) {
-                    Ok(output) => {
-                        if !output.is_empty() {
-                            println!("{}", output);
-                        }
-                        return;
-                    }
-                    Err(e) => {
-                        eprintln!("{}", e.to_string().red());
-                        return;
-                    }
-                }
-            }
         }
 
         // Check for common typos in directory names
@@ -306,52 +302,48 @@ impl DiracTerminal {
         if input.starts_with("go to ") || input.starts_with("open ") || input.starts_with("change to ") {
             let path = input.split_whitespace().skip(2).collect::<Vec<_>>().join(" ");
             let cd_command = format!("cd {}", path);
-            self.execute_direct_command(&cd_command);
+            self.execute_direct_command(&cd_command).await;
         }
         // If it's a direct command, execute it
         else if self.command_executor.is_valid_command(input) {
-            self.execute_direct_command(input);
+            self.execute_direct_command(input).await;
         } else {
             self.process_ai_command(input).await;
         }
     }
 
-    fn execute_direct_command(&mut self, command: &str) {
-        println!("{} {}", "Executing:".blue(), command.yellow());
-        match self.command_executor.execute(command) {
+    async fn execute_direct_command(&mut self, command: &str) {
+        match self.command_executor.execute(command).await {
             Ok(output) => {
-                if output.trim().is_empty() {
-                    println!("{}", "✓ Command executed successfully.".green().bold());
-                } else {
-                    println!("{}", "=== Command Output ===".green());
+                if !output.is_empty() {
                     println!("{}", output);
-                    println!("{}", "=== End of Output ===".green());
                 }
+                // Ensure output is flushed
+                std::io::stdout().flush().unwrap_or_default();
             }
             Err(e) => {
-                eprintln!("{}", "⚠ Command execution failed:".red().bold());
                 eprintln!("{}", e.to_string().red());
-                eprintln!("{}", "Try 'help' for command usage or use natural language to describe what you want to do.".yellow());
+                std::io::stderr().flush().unwrap_or_default();
             }
         }
     }
 
     async fn process_ai_command(&mut self, input: &str) {
-        println!("{}", "🤖 Processing your request with AI...".yellow().bold());
-        println!("{} {}", "Input:".blue(), input);
-        println!("{}", "Analyzing and generating the most appropriate command...".yellow());
+        println!("{}", "🤖 Processing with AI...".yellow().bold());
+        println!("{} {}", "Request:".blue(), input);
+        println!("{}", "Analyzing request and generating command...".yellow());
         
         match self.ai_processor.process(input, String::new().as_str()).await {
-            Ok(suggested_command) => self.handle_ai_suggestion(suggested_command.as_str()),
+            Ok(suggested_command) => self.handle_ai_suggestion(suggested_command.as_str()).await,
             Err(e) => self.handle_ai_error(e),
         }
     }
 
-    fn handle_ai_suggestion(&mut self, suggested_command: &str) {
+    async fn handle_ai_suggestion(&mut self, suggested_command: &str) {
         // Parse command and explanation from the AI response
         let mut command = String::new();
         let mut explanation = String::new();
-
+    
         for line in suggested_command.lines() {
             if line.starts_with("COMMAND:") {
                 command = line.trim_start_matches("COMMAND:").trim().to_string();
@@ -359,25 +351,25 @@ impl DiracTerminal {
                 explanation = line.trim_start_matches("EXPLANATION:").trim().to_string();
             }
         }
-
+    
         if command.is_empty() {
             eprintln!("{}", "❌ AI could not generate a suitable command for your request.".red().bold());
             eprintln!("{}", "Try rephrasing your request or use more specific terms.".yellow());
             return;
         }
-
-        println!("{}", "\n=== AI Suggestion =====".green().bold());
-        println!("{} {}", "📎 Suggested command:".blue(), command.yellow());
+    
+        println!("{}", "\n=== Command Suggestion =====".green().bold());
+        println!("{} {}", "📎 Command:".blue(), command.yellow());
         if !explanation.is_empty() {
-            println!("{} {}", "💡 Explanation:".blue(), explanation);
+            println!("{} {}", "💡 Details:".blue(), explanation);
         }
-
+    
         // Only show execution prompt if we have a valid command
         println!("{}", "\nWould you like to execute this command? [y/N/e(explain)]:".yellow());
-
+    
         if let Ok(confirmation) = self.editor.readline("") {
             match confirmation.trim().to_lowercase().as_str() {
-                "y" => self.execute_direct_command(&command),
+                "y" => self.execute_direct_command(&command).await,
                 "e" => {
                     if !explanation.is_empty() {
                         println!("{}", "\n=== Command Explanation ====".blue().bold());
@@ -385,7 +377,7 @@ impl DiracTerminal {
                         println!("{}", "\nWould you like to execute this command now? [y/N]:".yellow());
                         if let Ok(second_confirmation) = self.editor.readline("") {
                             if second_confirmation.trim().to_lowercase() == "y" {
-                                self.execute_direct_command(&command);
+                                self.execute_direct_command(&command).await;
                             }
                         }
                     } else {

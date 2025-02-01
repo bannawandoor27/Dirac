@@ -3,6 +3,9 @@ use std::process::Command;
 use std::env;
 use which::which;
 use std::cell::RefCell;
+use std::time::Duration;
+use tokio::process::Command as TokioCommand;
+use tokio::time::timeout;
 
 #[derive(Debug)]
 pub struct ShellCommandExecutor {
@@ -44,11 +47,21 @@ impl ShellCommandExecutor {
             return Err(DiracError::CommandExecutionError("No path specified for cd".to_string()));
         }
 
-        let new_dir = if path.starts_with('/') {
+        let path = if path == "~" || path.starts_with("~/") {
+            path.replacen("~", &env::var("HOME").unwrap_or_else(|_| String::from("/")), 1)
+        } else {
             path.to_string()
+        };
+
+        let new_dir = if path.starts_with('/') {
+            path
         } else {
             format!("{}/{}", self.current_dir.borrow(), path)
         };
+
+        // Resolve the path to handle . and .. components and symbolic links
+        let _canonical_path = std::fs::canonicalize(&new_dir)
+            .map_err(|e| DiracError::CommandExecutionError(format!("Invalid path: {}", e)))?;
 
         match env::set_current_dir(&new_dir) {
             Ok(_) => {
@@ -61,7 +74,7 @@ impl ShellCommandExecutor {
 }
 
 impl CommandExecutor for ShellCommandExecutor {
-    fn execute(&self, command: &str) -> DiracResult<String> {
+    async fn execute(&self, command: &str) -> DiracResult<String> {
         if command.trim().is_empty() {
             return Err(DiracError::CommandExecutionError("Empty command provided".to_string()));
         }
@@ -79,13 +92,19 @@ impl CommandExecutor for ShellCommandExecutor {
             *self.current_dir.borrow_mut() = current_dir.to_string_lossy().to_string();
         }
 
-        let output = Command::new(&self.shell_path)
+        // Set a reasonable timeout for commands
+        let timeout_duration = Duration::from_secs(30);
+
+        // Use tokio's async Command for all commands to ensure proper output handling
+        let output = TokioCommand::new(&self.shell_path)
             .arg("-c")
             .arg(command)
-            .env("ZDOTDIR", env::var("HOME").unwrap_or_else(|_| String::from("/")))
-            .env("ZSH_HISTORY_FILE", ".zsh_history")
+            .env("TERM", "xterm-256color")
+            .env("SHELL", &self.shell_path)
+            .env("PATH", env::var("PATH").unwrap_or_else(|_| String::from("/usr/local/bin:/usr/bin:/bin")))
             .current_dir(&*self.current_dir.borrow())
             .output()
+            .await
             .map_err(|e| DiracError::CommandExecutionError(format!("Failed to execute command: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -96,14 +115,22 @@ impl CommandExecutor for ShellCommandExecutor {
             *self.current_dir.borrow_mut() = new_dir.to_string_lossy().to_string();
         }
 
-        if !output.status.success() {
-            return Err(DiracError::CommandExecutionError(format!("Command failed: {}", stderr)));
-        }
-
-        if !stderr.is_empty() {
-            Err(DiracError::CommandExecutionError(stderr))
+        // Handle command execution status and output
+        if output.status.success() {
+            if !stdout.is_empty() {
+                Ok(stdout)
+            } else if !stderr.is_empty() {
+                Ok(stderr)
+            } else {
+                Ok(String::new())
+            }
         } else {
-            Ok(stdout)
+            Err(DiracError::CommandExecutionError(
+                format!("Command failed (exit code: {}): {}", 
+                    output.status.code().unwrap_or(-1),
+                    if !stderr.is_empty() { stderr.trim() } else { stdout.trim() }
+                )
+            ))
         }
     }
 }

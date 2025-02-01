@@ -1,81 +1,98 @@
-# Dirac - AI-Powered Terminal
+<div align="center">
 
-Dirac is an intelligent terminal interface that understands natural language commands, making command-line operations more intuitive and accessible.
+# Dirac
 
-## Features
+> 🧠 An AI-Powered Terminal That Understands Natural Language
 
-- 🧠 Natural language command processing
-- 🔍 Smart command completion and suggestions
-- 📁 File path completion
-- 📝 Command history with search
-- 🔌 Plugin system for extended functionality
-- 🎨 Colorful and intuitive interface
-- ⌨️ Emacs-style key bindings
-- 🔄 Signal handling (CTRL-C, CTRL-Z)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Installation
+</div>
+
+## 🌟 Overview
+
+Dirac is a revolutionary terminal application that leverages artificial intelligence to understand and process natural language commands. It bridges the gap between human language and command-line operations, making terminal interactions more intuitive and efficient.
+
+## ✨ Features
+
+- 🧠 **Natural Language Processing**: Understand and execute commands written in plain English
+- 🔍 **Smart Command Completion**: Intelligent suggestions based on context and history
+- 📁 **File Path Completion**: Seamless navigation through your filesystem
+- 📝 **Command History**: Searchable history with smart filtering
+- 🔌 **Plugin System**: Extensible architecture for custom functionality
+- 🎨 **Modern Interface**: Colorful and intuitive terminal UI
+- ⌨️ **Emacs-style Keybindings**: Familiar keyboard shortcuts
+- 🔄 **Signal Handling**: Proper handling of CTRL-C and CTRL-Z
+
+## 🚀 Installation
 
 ### Prerequisites
 
 - Rust and Cargo (latest stable version)
 - [Ollama](https://ollama.ai/) for AI processing
 
-### Building from Source
+### Quick Start
 
 ```bash
 # Clone the repository
-git clone https://github.com/bannawandoor27/Dirac.git
-cd Dirac
+git clone https://github.com/bannawandoor27/dirac.git
 
-# Build the project
-cargo build --release
+# Navigate to the project directory
+cd dirac
 
-# Run Dirac
-cargo run
+# Build and install
+cargo install --path .
 ```
 
-## Usage
-
-Dirac accepts both natural language commands and traditional shell syntax:
+## 🎯 Usage
 
 ```bash
-# Natural language examples
-dirac> show me all text files in the current directory
-dirac> create a new directory called projects
-dirac> go to the downloads folder
+# Start Dirac
+dirac
 
-# Traditional syntax also works
-dirac> ls *.txt
-dirac> mkdir projects
-dirac> cd ~/Downloads
+# Use natural language commands
+> show me all pdf files modified in the last week
+> create a new python virtual environment
+> what's using port 8080?
 ```
 
-### Key Features
+## 🛠 Development
 
-1. **Natural Language Processing**
-   - Describe what you want to do in plain English
-   - AI translates your request into the appropriate command
-   - Review and confirm before execution
+```bash
+# Clone the repository
+git clone https://github.com/bannawandoor27/dirac.git
 
-2. **Smart Completion**
-   - Tab completion for files and directories
-   - Command history suggestions
-   - Bracket matching and syntax highlighting
+# Navigate to project directory
+cd dirac
 
-3. **Plugin System**
-   - Extend functionality with custom plugins
-   - Easy integration with existing tools
+# Install dependencies and build
+cargo build
 
-## Contributing
+# Run tests
+cargo test
+```
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## 🤝 Contributing
 
-## License
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-## Acknowledgments
+## 📝 License
 
-- Built with Rust 🦀
-- Powered by Ollama for AI processing
-- Inspired by modern AI-powered developer tools
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 👤 Author
+
+**Hasanulbanna**
+
+- GitHub: [@bannawandoor27](https://github.com/bannawandoor27)
+
+---
+
+<div align="center">
+Made with ❤️ by Hasanulbanna
+</div>

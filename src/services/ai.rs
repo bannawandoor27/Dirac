@@ -29,23 +29,69 @@ impl OllamaProcessor {
 #[async_trait::async_trait]
 impl AIProcessor for OllamaProcessor {
     async fn process<'a>(&'a self, input: &'a str, context: &'a str) -> DiracResult<String> {
+        let current_dir = std::env::current_dir().unwrap_or_default().display().to_string();
+        let os_type = if cfg!(target_os = "windows") {
+            "windows"
+        } else if cfg!(target_os = "macos") {
+            "macos"
+        } else {
+            "linux"
+        };
+        let directory_structure = std::fs::read_dir(".").map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| format!("  {}", e.file_name().to_string_lossy()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }).unwrap_or_default();
+
+        // Improved system prompt:
+        let prompt = format!(
+            "You are a sophisticated terminal command generator that converts natural language requests into precise, executable shell commands.
+When provided with a user request and additional context, you must:
+  
+1. **Ensure Accuracy and Safety**:
+   - Generate commands that can be executed directly without any modifications.
+   - Prioritize safe, non-destructive commands (e.g., 'ls', 'pwd') when the request is ambiguous.
+   - Convert natural language navigation requests (such as 'go to', 'open', 'change to') into the appropriate 'cd' commands.
+
+2. **Detect and Correct Typos**:
+   - Identify any typographical errors (for example, convert 'lsbkk' to 'ls').
+   - If a correction is made or multiple interpretations are possible, include clear guidance in the explanation.
+
+3. **Leverage Context**:
+   - Use the provided details about the current working directory, operating system, and directory structure to tailor your response.
+   - Ensure that any suggested navigation or file-related commands reflect the actual environment.
+
+4. **Follow the Strict Response Format**:
+   - Your answer must be in the exact format shown below with no extra text:
+     
+     COMMAND: <the exact command to execute>
+     EXPLANATION: <a concise explanation of the command, including any corrections or alternative suggestions>
+
+**Input Details**:
+- User Request: '{}'
+- Additional Context: '{}'
+- Current Environment:
+   - Working Directory: {}
+   - OS Type: {}
+   - Directory Structure:
+{}
+
+Based on these details, generate the appropriate terminal command and a brief explanation.",
+            input,
+            context,
+            current_dir,
+            os_type,
+            directory_structure
+        );
+
         let response = self
             .client
             .post(&self.api_url)
             .json(&json!({
                 "model": self.model,
-                "prompt": format!("You are an intelligent terminal command assistant. Given this request: '{}' and context: '{}', generate the most appropriate terminal command.\n\nCurrent Environment:\n- Working Directory: {}\n- OS Type: {}\n- Directory Structure:\n{}\n\nFollow these rules:\n1. TYPO DETECTION AND CORRECTION:\n   - For typos (e.g. 'lsbkk' → 'ls'), suggest the most likely intended command\n   - Consider common keyboard layout patterns and letter proximity\n   - For ambiguous inputs, suggest the most common command with alternatives\n\n2. COMMAND INTELLIGENCE:\n   - Convert natural language to proper commands (e.g. 'show files' → 'ls')\n   - Handle navigation requests intelligently ('go to', 'open', 'cd')\n   - Suggest safer alternatives for potentially dangerous commands\n   - Consider the current directory structure when suggesting commands\n\n3. RESPONSE FORMAT:\n   - Command must be executable without modification\n   - Explanation should be clear, concise, and helpful\n   - Include correction notes if input appears to be a typo\n   - Suggest related commands or options when relevant\n\n4. SAFETY AND CONTEXT:\n   - Default to safe commands when input is unclear\n   - Consider OS-specific command variations\n   - Validate commands against current directory structure\n   - Prevent destructive operations without clear intent\n\nYour response MUST follow this format:\nCOMMAND: <exact command to execute>\nEXPLANATION: <clear explanation including corrections and alternatives if applicable>", 
-                    input, 
-                    context,
-                    std::env::current_dir().unwrap_or_default().display(),
-                    if cfg!(target_os = "windows") { "windows" } else if cfg!(target_os = "macos") { "macos" } else { "linux" },
-                    std::fs::read_dir(".").map(|entries| {
-                        entries
-                            .filter_map(|e| e.ok())
-                            .map(|e| format!("  {}", e.file_name().to_string_lossy()))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    }).unwrap_or_default()),
+                "prompt": prompt,
                 "stream": false
             }))
             .send()

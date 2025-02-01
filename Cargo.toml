@@ -1,0 +1,16 @@
+[package]
+name = "dirac"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libc = "0.2"
+tokio = { version = "1.35.1", features = ["full"] }
+clap = { version = "4.4.11", features = ["derive"] }
+serde = { version = "1.0.193", features = ["derive"] }
+serde_json = "1.0.108"
+rustyline = "13.0.0"
+colored = "2.1.0"
+which = "5.0.0"
+async-trait = "0.1.74"
+reqwest = { version = "0.11", features = ["json"] }

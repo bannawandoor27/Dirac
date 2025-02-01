@@ -7,6 +7,7 @@ use rustyline::highlight::{MatchingBracketHighlighter, Highlighter};
 use rustyline::hint::{HistoryHinter, Hinter};
 use std::borrow::Cow;
 use rustyline::history::DefaultHistory;
+use std::future::Future;
 
 pub struct DiracCompleter {
     filename_completer: FilenameCompleter,
@@ -310,15 +311,15 @@ impl DiracTerminal {
         }
         // If it's a direct command, execute it
         else if self.command_executor.is_valid_command(input) {
-            self.execute_direct_command(input);
+            self.execute_direct_command(input).await;
         } else {
             self.process_ai_command(input).await;
         }
     }
 
-    fn execute_direct_command(&mut self, command: &str) {
+    async fn execute_direct_command(&mut self, command: &str) {
         println!("{} {}", "Executing:".blue(), command.yellow());
-        match self.command_executor.execute(command) {
+        match self.command_executor.execute(command).await {
             Ok(output) => {
                 if output.trim().is_empty() {
                     println!("{}", "✓ Command executed successfully.".green().bold());
@@ -331,73 +332,68 @@ impl DiracTerminal {
             Err(e) => {
                 eprintln!("{}", "⚠ Command execution failed:".red().bold());
                 eprintln!("{}", e.to_string().red());
-                eprintln!("{}", "Try 'help' for command usage or use natural language to describe what you want to do.".yellow());
+
+                // Provide AI-powered suggestions for failed commands
+                if command.starts_with("cd ") {
+                    let path = command.trim_start_matches("cd ").trim();
+                    match path {
+                        "back" => {
+                            println!("{}", "\nℹ️ Suggestion:".blue());
+                            println!("Use '{}' to navigate to the parent directory.", "cd ..".yellow());
+                            println!("You can also use '{}' to go to your home directory.", "cd ~".yellow());
+                        },
+                        _ => {
+                            if let Ok(entries) = std::fs::read_dir(".") {
+                                let similar: Vec<String> = entries
+                                    .filter_map(|e| e.ok())
+                                    .filter(|e| e.path().is_dir())
+                                    .filter_map(|e| e.file_name().into_string().ok())
+                                    .filter(|name| name.len() >= 2 && path.len() >= 2 &&
+                                            name.chars().next() == path.chars().next())
+                                    .collect();
+
+                                if !similar.is_empty() {
+                                    println!("{}", "\nℹ️ Similar directories found:".blue());
+                                    for dir in similar {
+                                        println!("  {}", dir.yellow());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                eprintln!("{}", "\nTry 'help' for command usage or use natural language to describe what you want to do.".yellow());
             }
         }
     }
 
     async fn process_ai_command(&mut self, input: &str) {
-        println!("{}", "🤖 Processing your request with AI...".yellow().bold());
         println!("{} {}", "Input:".blue(), input);
         println!("{}", "Analyzing and generating the most appropriate command...".yellow());
         
         match self.ai_processor.process(input, String::new().as_str()).await {
-            Ok(suggested_command) => self.handle_ai_suggestion(suggested_command.as_str()),
-            Err(e) => self.handle_ai_error(e),
+            Ok(suggested_command) => self.handle_ai_suggestion(suggested_command.as_str()).await,
+            Err(e) => self.handle_ai_error(e).await,
         }
     }
 
-    fn handle_ai_suggestion(&mut self, suggested_command: &str) {
-        // Parse command and explanation from the AI response
-        let mut command = String::new();
-        let mut explanation = String::new();
+    async fn handle_ai_suggestion(&mut self, suggested_command: &str) {
+        println!("{} {}", "Suggested command:".blue(), suggested_command.yellow());
+        println!("{}", "Would you like to execute this command? [y/N]:".yellow());
 
-        for line in suggested_command.lines() {
-            if line.starts_with("COMMAND:") {
-                command = line.trim_start_matches("COMMAND:").trim().to_string();
-            } else if line.starts_with("EXPLANATION:") {
-                explanation = line.trim_start_matches("EXPLANATION:").trim().to_string();
-            }
-        }
-
-        if command.is_empty() {
-            eprintln!("{}", "❌ AI could not generate a suitable command for your request.".red().bold());
-            eprintln!("{}", "Try rephrasing your request or use more specific terms.".yellow());
-            return;
-        }
-
-        println!("{}", "\n=== AI Suggestion =====".green().bold());
-        println!("{} {}", "📎 Suggested command:".blue(), command.yellow());
-        if !explanation.is_empty() {
-            println!("{} {}", "💡 Explanation:".blue(), explanation);
-        }
-
-        // Only show execution prompt if we have a valid command
-        println!("{}", "\nWould you like to execute this command? [y/N/e(explain)]:".yellow());
-
-        if let Ok(confirmation) = self.editor.readline("") {
-            match confirmation.trim().to_lowercase().as_str() {
-                "y" => self.execute_direct_command(&command),
-                "e" => {
-                    if !explanation.is_empty() {
-                        println!("{}", "\n=== Command Explanation ====".blue().bold());
-                        println!("{}", explanation);
-                        println!("{}", "\nWould you like to execute this command now? [y/N]:".yellow());
-                        if let Ok(second_confirmation) = self.editor.readline("") {
-                            if second_confirmation.trim().to_lowercase() == "y" {
-                                self.execute_direct_command(&command);
-                            }
-                        }
-                    } else {
-                        println!("{}", "No detailed explanation available for this command.".yellow());
-                    }
+        match self.editor.readline("") {
+            Ok(confirmation) => {
+                if confirmation.trim().to_lowercase() == "y" {
+                    self.execute_direct_command(suggested_command).await;
                 }
-                _ => println!("{}", "Command execution cancelled.".yellow())
+            }
+            Err(e) => {
+                eprintln!("{} {}", "Error reading confirmation:".red(), e);
             }
         }
     }
 
-    fn handle_ai_error(&self, error: DiracError) {
+    async fn handle_ai_error(&mut self, error: DiracError) {
         eprintln!("{}", "Error processing with AI:".red());
         eprintln!("{}", error.to_string().red());
         eprintln!("{}", "Please ensure the Ollama service is running correctly.".yellow());

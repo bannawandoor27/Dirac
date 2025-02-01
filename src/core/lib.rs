@@ -6,8 +6,10 @@ pub trait AIProcessor {
     async fn process<'a>(&'a self, input: &'a str, context: &'a str) -> DiracResult<String>;
 }
 
+#[async_trait::async_trait]
 pub trait CommandExecutor {
-    fn execute(&self, command: &str) -> DiracResult<String>;
+    async fn execute(&self, command: &str) -> DiracResult<String>;
+    fn get_ai_suggestion(&self, failed_command: &str) -> DiracResult<String>;
 }
 
 pub trait TerminalInterface {

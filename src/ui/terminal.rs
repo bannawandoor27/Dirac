@@ -238,7 +238,30 @@ impl DiracTerminal {
             return Ok(true);
         }
 
-        self.process_command(input).await;
+        match self.command_executor.execute(input).await {
+            Ok(output) => {
+                if !output.is_empty() {
+                    println!("{}", output);
+                }
+            }
+            Err(e) => {
+                eprintln!("{}", e.to_string().red());
+                // Get AI feedback for the failed command
+                match self.ai_processor.process(
+                    &format!("Command '{}' failed. Please explain what went wrong and suggest a solution.", input),
+                    &e.to_string()
+                ).await {
+                    Ok(feedback) => {
+                        println!("");
+                        println!("{}", "🤖 AI Feedback:".blue().bold());
+                        println!("{}", feedback);
+                    }
+                    Err(ai_err) => {
+                        eprintln!("{}", format!("Failed to get AI feedback: {}", ai_err).red());
+                    }
+                }
+            }
+        };
         Ok(false)
     }
 

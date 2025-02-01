@@ -23,34 +23,55 @@ impl DiracCompleter {
             command_history: Vec::new(),
         }
     }
+
+    pub fn update_history(&mut self, command: String) {
+        if !command.trim().is_empty() && !self.command_history.contains(&command) {
+            self.command_history.push(command);
+        }
+    }
 }
 
 impl Completer for DiracCompleter {
     type Candidate = Pair;
 
-    fn complete(&self, line: &str, pos: usize, _ctx: &rustyline::Context<'_>) 
+    fn complete(&self, line: &str, pos: usize, ctx: &rustyline::Context<'_>) 
         -> rustyline::Result<(usize, Vec<Pair>)> {
-        // First try filename completion
-        let filename_result = self.filename_completer.complete(line, pos, _ctx)?;
-        
-        // If we have filename completions, return those
-        if !filename_result.1.is_empty() {
-            return Ok(filename_result);
-        }
-
-        // Otherwise, try command history completion
         let word = line[..pos].split_whitespace().last().unwrap_or("");
         let start = pos - word.len();
-        
-        let mut matches: Vec<Pair> = self.command_history.iter()
-            .filter(|cmd| cmd.starts_with(word))
+
+        let mut matches = Vec::new();
+
+        // Try filename completion first
+        let filename_result = self.filename_completer.complete(line, pos, ctx)?;
+        matches.extend(filename_result.1);
+
+        // Add command history completions with case-insensitive matching
+        let word_lower = word.to_lowercase();
+        let history_matches: Vec<Pair> = self.command_history.iter()
+            .filter(|cmd| cmd.to_lowercase().starts_with(&word_lower))
             .map(|cmd| Pair {
                 display: cmd.to_string(),
                 replacement: cmd.to_string(),
             })
             .collect();
+        matches.extend(history_matches);
+
+        // Deduplicate matches while preserving order
         matches.dedup_by(|a, b| a.display == b.display);
-        
+
+        // Sort matches by relevance
+        matches.sort_by(|a, b| {
+            let a_starts = a.display.starts_with(word);
+            let b_starts = b.display.starts_with(word);
+            if a_starts && !b_starts {
+                std::cmp::Ordering::Less
+            } else if !a_starts && b_starts {
+                std::cmp::Ordering::Greater
+            } else {
+                a.display.cmp(&b.display)
+            }
+        });
+
         Ok((start, matches))
     }
 }
@@ -89,6 +110,10 @@ impl Validator for DiracHelper {
 }
 
 impl Highlighter for DiracHelper {
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        self.highlighter.highlight_hint(hint)
+    }
+
     fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
         self.highlighter.highlight(line, pos)
     }
@@ -121,7 +146,10 @@ impl DiracTerminal {
             .completion_type(CompletionType::List)
             .edit_mode(EditMode::Emacs)
             .build();
-        let editor = Editor::with_config(config).unwrap();
+
+        let mut editor = Editor::with_config(config).unwrap();
+        editor.set_helper(Some(DiracHelper::new()));
+
         Self {
             editor,
             command_executor: ShellCommandExecutor::new(),
@@ -227,6 +255,12 @@ impl DiracTerminal {
         };
         let prompt = format!("dirac[{}]> ", dir_display);
         let line = self.editor.readline(&prompt)?;
+
+        // Update command history in the helper
+        if let Some(helper) = self.editor.helper_mut() {
+            helper.completer.update_history(line.clone());
+        }
+
         self.editor.add_history_entry(line.as_str()).unwrap();
         let input = line.trim();
 

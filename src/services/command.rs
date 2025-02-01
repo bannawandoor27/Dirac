@@ -60,7 +60,7 @@ impl ShellCommandExecutor {
         };
 
         // Resolve the path to handle . and .. components and symbolic links
-        let canonical_path = std::fs::canonicalize(&new_dir)
+        let _canonical_path = std::fs::canonicalize(&new_dir)
             .map_err(|e| DiracError::CommandExecutionError(format!("Invalid path: {}", e)))?;
 
         match env::set_current_dir(&new_dir) {
@@ -74,7 +74,7 @@ impl ShellCommandExecutor {
 }
 
 impl CommandExecutor for ShellCommandExecutor {
-    fn execute(&self, command: &str) -> DiracResult<String> {
+    async fn execute(&self, command: &str) -> DiracResult<String> {
         if command.trim().is_empty() {
             return Err(DiracError::CommandExecutionError("Empty command provided".to_string()));
         }

@@ -7,7 +7,7 @@ pub trait AIProcessor {
 }
 
 pub trait CommandExecutor {
-    fn execute(&self, command: &str) -> DiracResult<String>;
+    async fn execute(&self, command: &str) -> DiracResult<String>;
 }
 
 pub trait TerminalInterface {

@@ -3,6 +3,9 @@ use std::process::Command;
 use std::env;
 use which::which;
 use std::cell::RefCell;
+use std::time::Duration;
+use tokio::process::Command as TokioCommand;
+use tokio::time::timeout;
 
 #[derive(Debug)]
 pub struct ShellCommandExecutor {
@@ -44,11 +47,21 @@ impl ShellCommandExecutor {
             return Err(DiracError::CommandExecutionError("No path specified for cd".to_string()));
         }
 
-        let new_dir = if path.starts_with('/') {
+        let path = if path == "~" || path.starts_with("~/") {
+            path.replacen("~", &env::var("HOME").unwrap_or_else(|_| String::from("/")), 1)
+        } else {
             path.to_string()
+        };
+
+        let new_dir = if path.starts_with('/') {
+            path
         } else {
             format!("{}/{}", self.current_dir.borrow(), path)
         };
+
+        // Resolve the path to handle . and .. components and symbolic links
+        let canonical_path = std::fs::canonicalize(&new_dir)
+            .map_err(|e| DiracError::CommandExecutionError(format!("Invalid path: {}", e)))?;
 
         match env::set_current_dir(&new_dir) {
             Ok(_) => {
@@ -79,14 +92,38 @@ impl CommandExecutor for ShellCommandExecutor {
             *self.current_dir.borrow_mut() = current_dir.to_string_lossy().to_string();
         }
 
-        let output = Command::new(&self.shell_path)
-            .arg("-c")
-            .arg(command)
-            .env("ZDOTDIR", env::var("HOME").unwrap_or_else(|_| String::from("/")))
-            .env("ZSH_HISTORY_FILE", ".zsh_history")
-            .current_dir(&*self.current_dir.borrow())
-            .output()
-            .map_err(|e| DiracError::CommandExecutionError(format!("Failed to execute command: {}", e)))?;
+        // Set a reasonable timeout for commands
+let timeout_duration = Duration::from_secs(30);
+
+// Use tokio's async Command for potentially long-running operations
+let output = if command.starts_with("lsof") || command.starts_with("netstat") {
+    match timeout(timeout_duration, TokioCommand::new(&self.shell_path)
+        .arg("-c")
+        .arg(command)
+        .current_dir(&*self.current_dir.borrow())
+        .output()).await {
+            Ok(result) => result.map_err(|e| DiracError::CommandExecutionError(
+                format!("Failed to execute command: {}", e)
+            ))?,
+            Err(_) => return Err(DiracError::CommandExecutionError(
+                format!("Command timed out after {} seconds", timeout_duration.as_secs())
+            ))
+    }
+} else {
+    Command::new(&self.shell_path)
+        .arg("-c")
+        .arg(command)
+        .env("ZDOTDIR", env::var("HOME").unwrap_or_else(|_| String::from("/")))
+        .env("ZSH_HISTORY_FILE", ".zsh_history")
+        .current_dir(&*self.current_dir.borrow())
+        .output()
+        .map_err(|e| DiracError::CommandExecutionError(format!("Failed to execute command: {}", e)))?
+};
+
+        // Handle process termination signals
+        if output.status.code().is_none() {
+            return Err(DiracError::CommandExecutionError("Command was terminated by a signal".to_string()));
+        }
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -96,14 +133,22 @@ impl CommandExecutor for ShellCommandExecutor {
             *self.current_dir.borrow_mut() = new_dir.to_string_lossy().to_string();
         }
 
-        if !output.status.success() {
-            return Err(DiracError::CommandExecutionError(format!("Command failed: {}", stderr)));
-        }
-
-        if !stderr.is_empty() {
-            Err(DiracError::CommandExecutionError(stderr))
-        } else {
-            Ok(stdout)
+        // Handle command execution status and output
+        match (output.status.success(), stderr.is_empty()) {
+            (true, true) => Ok(stdout),
+            (true, false) => {
+                // Command succeeded but produced stderr output
+                if !stdout.is_empty() {
+                    Ok(format!("{}
+Warning: {}", stdout, stderr))
+                } else {
+                    Ok(format!("Warning: {}", stderr))
+                }
+            },
+            (false, _) => Err(DiracError::CommandExecutionError(format!("Command failed (exit code: {}): {}", 
+                output.status.code().unwrap_or(-1),
+                if stderr.is_empty() { &stdout } else { &stderr }
+            )))
         }
     }
 }

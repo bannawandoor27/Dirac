@@ -10,7 +10,7 @@
 
 ## 🌟 Overview
 
-Dirac is a revolutionary terminal application that leverages artificial intelligence to understand and process natural language commands. It bridges the gap between human language and command-line operations, making terminal interactions more intuitive and efficient.
+dirac-terminal is a revolutionary terminal application that leverages artificial intelligence to understand and process natural language commands. It bridges the gap between human language and command-line operations, making terminal interactions more intuitive and efficient.
 
 ## ✨ Features
 
@@ -33,21 +33,20 @@ Dirac is a revolutionary terminal application that leverages artificial intellig
 ### Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/bannawandoor27/dirac.git
+# Install from crates.io
+cargo install dirac-terminal
 
-# Navigate to the project directory
-cd dirac
-
-# Build and install
+# Or build from source
+git clone https://github.com/bannawandoor27/dirac-terminal.git
+cd dirac-terminal
 cargo install --path .
 ```
 
 ## 🎯 Usage
 
 ```bash
-# Start Dirac
-dirac
+# Start dirac-terminal
+dirac-terminal
 
 # Use natural language commands
 > show me all pdf files modified in the last week
@@ -59,10 +58,10 @@ dirac
 
 ```bash
 # Clone the repository
-git clone https://github.com/bannawandoor27/dirac.git
+git clone https://github.com/bannawandoor27/dirac-terminal.git
 
 # Navigate to project directory
-cd dirac
+cd dirac-terminal
 
 # Install dependencies and build
 cargo build
